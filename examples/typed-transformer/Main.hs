@@ -45,14 +45,16 @@ import qualified Pipes.Safe.Prelude as Safe
 import qualified Pipes.Safe as Safe
 import qualified Pipes.Text as Text
 import qualified Pipes.Text.IO as Text
-
+import Torch.Data.Pipeline
 import Torch.Typed
 import Torch (ATenTensor)
 import Torch.Internal.Class (Castable)
 import Torch.Internal.Managed.Type.Context (manual_seed_L)
+import Torch.Data.Pipeline (Dataset(..))
+-- import Control.Monad.Trans.Control (MonadBaseControl(..))
 
-type WorkerDevices = '[ '( 'CUDA, 0)]
-type ModelDevice = '( 'CUDA, 0)
+type WorkerDevices = '[ '( 'CPU, 0)]
+type ModelDevice = '( 'CPU, 0)
 type DataDevice = '( 'CPU, 0)
 type BatchSize = 1
 type SeqLen = 512
@@ -62,6 +64,16 @@ type NumHeads = 12
 type FFNDim = 3072
 type PaddingIdx = 0
 type EmbedDim = 768
+
+data TransformerData = TransformerData { dataLength :: Int, filePath :: FilePath, vocab :: OSet.OSet Text.Text }
+
+instance ( KnownNat seqLen
+         , KnownDevice modelDevice
+         , KnownNat batchSize
+         ) =>
+  Dataset (Safe.SafeT IO) TransformerData (Maybe (Tensor modelDevice 'Int64 '[batchSize, seqLen], Tensor modelDevice 'Int64 '[batchSize, seqLen])) where
+  getBatch transformerData iter = readData (filePath transformerData) (vocab transformerData)
+  numIters = dataLength
 
 type Model numEmbeds modelDevice
   = TransformerLM
@@ -110,9 +122,7 @@ program numEpochs trainingFile trainingLen evaluationFile evaluationLen = Safe.r
     -> OSet.OSet Text.Text
     -> Effect (Safe.SafeT IO) ()
   go Dict vocab = 
-    let trainingData   = readData @SeqLen @DataDevice @BatchSize @(Safe.SafeT IO) trainingFile   vocab >-> P.take trainingLen
-        evaluationData = readData @SeqLen @DataDevice @BatchSize @(Safe.SafeT IO) evaluationFile vocab >-> P.take evaluationLen
-        learning' = do
+    let learning' = do
           let learningRate = 0.01
           -- manual_seed_L 123
           model <- liftIO $ sample
@@ -131,7 +141,10 @@ program numEpochs trainingFile trainingLen evaluationFile evaluationLen = Safe.r
               ) :: ModelSpec numEmbeds ModelDevice
             )
           let optim = mkAdam 0 0.9 0.999 (flattenParameters model)
-          learning @WorkerDevices @ModelDevice @DataDevice @numEmbeds @BatchSize @SeqLen numEpochs learningRate (model, optim) trainingData evaluationData
+          trainingFold <- lift $ makeFold (TransformerData { dataLength = trainingLen, filePath = trainingFile, vocab = vocab })
+          evaluationFold <- lift $ makeFold (TransformerData { dataLength = evaluationLen, filePath = evaluationFile, vocab = vocab })
+          -- learning @WorkerDevices @ModelDevice @DataDevice @numEmbeds @BatchSize @SeqLen numEpochs learningRate (model, optim) trainingData evaluationData
+          learning @WorkerDevices @ModelDevice @DataDevice @numEmbeds @BatchSize @SeqLen numEpochs learningRate (model, optim) trainingFold evaluationFold
     in  learning' >-> P.map (\(loss, _, _) -> loss) >-> P.print
 
 mkNumEmbedsProof
@@ -172,11 +185,11 @@ training
      )
   => LearningRate modelDevice dtype
   -> (model, optim)
-  -> Producer (input, target) m ()
-  -> m (model, optim)
-training learningRate (model, optim) = P.foldM step begin done
+  -> (FoldM m (Maybe (input, target)) (model,optim))
+training learningRate (model, optim) = FoldM step begin done
   where
-    step (model', optim') (input, target) = do
+    step (model', optim') Nothing = pure (model', optim')
+    step (model', optim') (Just (input, target)) = do
       let models' = replicate @workerDevices @modelDevice @model @models model'
           inputs = scatter @workerDevices @dataDevice @input @inputs input
           targets = scatter @workerDevices @dataDevice @target @targets target
@@ -204,11 +217,11 @@ evaluation
      , MonadIO m
      )
   => model
-  -> Producer (input, target) m ()
-  -> m Float
-evaluation model = P.foldM step begin done
+  -> (FoldM m (Maybe (input,target)) Float)
+evaluation model = FoldM step begin done
   where
-    step aggLoss (input, target) = do
+    step aggLoss Nothing = pure aggLoss
+    step aggLoss (Just (input, target)) = do
       let models = replicate @workerDevices @modelDevice @model @models model
           inputs = scatter @workerDevices @dataDevice @input @inputs input
       outputs <- liftIO . runConcurrently $ forwardConcurrently @models @inputs models inputs
@@ -245,17 +258,18 @@ learning
      , KnownDType dtype
      , All KnownDevice '[modelDevice, dataDevice]
      , MonadIO m
+     , m ~ Safe.SafeT IO
      )
   => Int
   -> LearningRate modelDevice dtype
   -> (model, optim)
-  -> Producer (input, target) m ()
-  -> Producer (input, target) m ()
+  -> (FoldM (Safe.SafeT IO) (Maybe (input,target)) (model,optim) -> Safe.SafeT IO (model, optim))
+  -> (FoldM (Safe.SafeT IO) (Maybe (input,target)) Float -> Safe.SafeT IO Float)
   -> Producer (Float, model, optim) m ()
-learning numEpochs learningRate (model, optim) trainingData evaluationData =
+learning numEpochs learningRate (model, optim) trainingFold evaluationFold =
   for (each [1 .. numEpochs]) $ \_epoch -> do
-    (model', optim') <- lift $ training @workerDevices @modelDevice @dataDevice @dtype @model @models @optim @input @inputs @target @targets @inputTargets @losses @parameters' @gradients @parameters @tensors learningRate (model, optim) trainingData
-    evalLoss' <- lift $ evaluation @workerDevices @modelDevice @dataDevice @numEmbeds @batchSize @seqLen @dtype @model @models @input @inputs @output @outputs @target model' evaluationData
+    (model', optim') <- lift $ trainingFold $ training @workerDevices @modelDevice @dataDevice @dtype @model @models @optim @input @inputs @target @targets @inputTargets @losses @parameters' @gradients @parameters @tensors learningRate (model, optim) 
+    evalLoss' <- lift $ evaluationFold $ evaluation @workerDevices @modelDevice @dataDevice @numEmbeds @batchSize @seqLen @dtype @model @models @input @inputs @output @outputs @target model' 
     yield (evalLoss', model', optim')
 
 readData
@@ -263,23 +277,23 @@ readData
    . (KnownNat seqLen, KnownDevice modelDevice, KnownNat batchSize, Safe.MonadSafe m)
   => FilePath
   -> OSet.OSet Text.Text
-  -> Producer (Tensor modelDevice 'Int64 '[batchSize, seqLen], Tensor modelDevice 'Int64 '[batchSize, seqLen]) m ()
-readData file vocab = raw >-> pipe
+  -> m (Maybe (Tensor modelDevice 'Int64 '[batchSize, seqLen], Tensor modelDevice 'Int64 '[batchSize, seqLen]))
+readData file vocab = f <$> raw
   where
     raw = Safe.withFile file IO.ReadMode
-      $ \h -> batching
-      . L.purely folds L.list
-      . chain (sequencing . readHandleEndlesslyFromOffset h)
-      $ randomOffsets
-    sequencing = (>-> applyVocab vocab)
+          $ \h -> batching
+                  . L.purely folds L.list
+                  . chain (sequencing . readHandleEndlesslyFromOffset h)
+                  $ randomOffsets
+
+    sequencing =
+      (>-> applyVocab vocab)
       . L.purely folds L.mconcat
       . takes (natValI @(seqLen + 1))
       . drops 1
       . view Text.words
-    batching = L.purely folds L.list . view (chunksOf (natValI @batchSize))
-    pipe = for Pipes.cat $ \x -> case f x of
-      Nothing -> return ()
-      Just y -> yield y
+    batching src =  L.purely P.fold L.list $ src >-> P.take (natValI @batchSize)  
+  
     f xs = do
       let xs' = Maybe.catMaybes <$> xs
       input <- Exts.fromList $ take (natValI @seqLen) <$> xs'
@@ -362,3 +376,8 @@ instance
   forwardStoch model (input, target) = do
     prediction <- forwardStoch model input
     return $ crossEntropyLoss @PaddingIdx prediction target
+
+
+applyVocab2 :: forall a m . (Ord a, Functor m) => OSet.OSet a -> m a -> m (Maybe OSet.Index)  
+applyVocab2 = fmap . flip OSet.findIndex
+
