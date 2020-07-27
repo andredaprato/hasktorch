@@ -51,7 +51,7 @@ instance FromRecord Glove where
 gloveToTensor :: V.Vector Glove -> V.Vector (Text, Tensor)
 gloveToTensor gloves =  (\g -> (label g, asTensor . V.toList . gloveEmbed $ g))  <$> gloves 
 
-pipeline dataset = [()] & (makeListT' dataset  >=> pmap 2 (first gloveToTensor))
+pipeline glove = [()] & (makeListT' glove  >=> pmap 2 (first gloveToTensor))
  
 buildVocab :: (MonadIO m) => ListT m ((V.Vector (Text, Tensor)), Int) -> m (H.HashMap Text Tensor)
 buildVocab inputs = P.foldM step begin done $  enumerate inputs 
@@ -76,8 +76,6 @@ embedWord word gloveEmbed seqLen = case H.lookup word gloveEmbed of
                          Nothing -> liftIO $ randnIO' [seqLen]
                          Just a -> pure a
 
-  -- Torsten: use gru
-  -- use embedding layer
 newtype Imdb = Imdb String
 
 -- | for preexisting datasets we could reexport a pipeline like this rather as well as the raw dataset
@@ -109,17 +107,3 @@ instance (MonadBase IO m, MonadSafe m) => Datastream m () Imdb Text where
         -- >-> P.map (replace "<br>" )
       -- undefined
       
--- ask adam paszke what his long term vision of dex is  
-    
-  
--- | JULY 25  DO THIS
---   - start from the ground up on RNN
---   - learn how RNNs work in good detail
---   - then LSTM
---   - then GRU
---   - then attention
---   - then transformers
-
-
--- ok how do we decode a variable length tensor without padding beforehand?
--- dynamic types????
