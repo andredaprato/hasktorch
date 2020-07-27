@@ -68,7 +68,8 @@ cradle:
       component: "exe:csv-test"
     - path: "./examples/iris-classification"
       component: "exe:iris-classification"
-
+    - path: "./examples/imdb-sentiment-analysis"
+      component: "exe:imdb-sentiment-analysis"
     - path: "./experimental/dataloader-cifar10"
       component: "exe:dataloader-cifar10"
     - path: "./experimental/untyped-nlp"
