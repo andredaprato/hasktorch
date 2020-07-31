@@ -71,9 +71,8 @@ instance FromRecord Glove where
   parseRecord v = do
     mLabel <- parseField $ v V.! 0 
     mEmbed <- parseRecord $ V.tail v
-    pure Glove { label = mLabel
-               , gloveEmbed = mEmbed
-               }
+    pure Glove { label = mLabel , gloveEmbed = mEmbed}
+
 getEmbeds :: forall device vocabSize embedDim m .
   ( MonadIO m
   ) =>
@@ -90,7 +89,7 @@ unk = "[UNK]"
 
 ixSetWithEmbed :: Int -> (OSet.OSet Text, [[Float]])
 ixSetWithEmbed embedDim = (ixSet, Prelude.replicate 2 embed)
-  where ixSet =  "[UNK]" OSet.|< "[PAD]" OSet.|< OSet.empty
+  where ixSet =   "[PAD]" OSet.|< "[UNK]" OSet.|< OSet.empty
         embed = Prelude.replicate embedDim 0 
 
 lookupIx ::  OSet.OSet Text -> Text -> Int
@@ -98,10 +97,11 @@ lookupIx set str = fromMaybe 1 (OSet.findIndex str set)
   
  
 
-type BatchSize = 128
-type SeqLen = 256
+type BatchSize = 16
+type SeqLen = 128
 type VocabSize = 5000
 type EmbedDim = 100
+
 main :: IO ()
 main = runSafeT $ do
   -- we should probably avoid using a csvDataset here and just define our own dataset 
@@ -134,18 +134,17 @@ padSequence tokens =  Prelude.take (Typed.natValI @seqLen) tokens <> (Prelude.ta
 imdbToIndices :: forall seqLen batchSize device m a .
   (Functor m, Typed.KnownDevice device, KnownNat seqLen, KnownNat batchSize)
   => OSet.OSet Text
-  -> Pipe [(([Text], Sentiment), a)] ((Typed.Tensor device 'Int64 '[batchSize, seqLen], Typed.Tensor device 'Float '[batchSize]), a) m ()
+  -> Pipe [(([Text], Sentiment), a)] ((Typed.Tensor device 'Int64 '[batchSize, seqLen], Typed.Tensor device 'Int64 '[batchSize]), a) m ()
 imdbToIndices oset =
   for Pipes.cat $ \x -> case f x of
                                     Nothing -> return ()
                                     Just y -> yield ( y, snd . head $  x)
     where f batch = do
-            -- ugly because fromList doesn't support scalar tensors (yet?)
             pure $ Debug.traceShowId $ Prelude.length batch
             labels <- (Exts.fromList $ (fromEnum . snd . fst) <$> batch) :: Maybe (Typed.Tensor '( 'CPU, 0) 'Int64 '[batchSize])
             let indices = (fmap) (fmap (lookupIx oset) . fst . fst) $ batch
             ixTensor <- Exts.fromList indices
-            pure (toDevice @device @('( 'CPU, 0)) ixTensor, toDType @'Float @'Int64 $ toDevice @device @('( 'CPU, 0)) labels)
+            pure (toDevice @device @('( 'CPU, 0)) ixTensor, toDevice @device @('( 'CPU, 0)) labels)
 
 relevantEmbeddings imdb gloveFile = do
   (imdbVocab, embeds) <- concurrently (buildImdbVocab imdb) (runContT (makeListT' gloveFile [()]) getEmbeds)
@@ -167,7 +166,7 @@ tokenizerPipeline dataset = makeListT' dataset
                        >=> pmap 1 (first $ first  $ fmap $ Text.dropAround meaninglessTokens)
 
 dataPipeline :: forall seqLen batchSize device r m f seed .  _ =>
-  OSet.OSet Text -> Imdb -> f seed -> ContT r m (ListT m ((Tensor device 'Int64 '[batchSize, seqLen], Tensor device 'Float '[batchSize]), Int))
+  OSet.OSet Text -> Imdb -> f seed -> ContT r m (ListT m ((Tensor device 'Int64 '[batchSize, seqLen], Tensor device 'Int64 '[batchSize]), Int))
 dataPipeline indexSet imdb = tokenizerPipeline imdb >=> pmapChunk batches >=> pmap' 1 (imdbToIndices indexSet)
 
   where batches = L.purely Group.folds (mapList pad) . Lens.view (Group.chunksOf $ natValI @batchSize) 

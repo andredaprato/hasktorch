@@ -129,13 +129,12 @@ gruWithEmbedForward ::
        'Float
        device
      -> Bool
-     -> Tensor device 'Int64 '[batchSize, 256]
+     -> Tensor device 'Int64 '[batchSize, 128]
      -> Tensor device 'Float '[batchSize]
 gruWithEmbedForward GRUWithEmbed{..} dropoutOn =
   --FIXME need to take the final 2 layers of the rnn and concat them together then feed this to the FC layer and softmax
   -- with dropout on final layer 
   -- we should be able to do this with Torch.Typed.Functional.chunk
-
    squeezeAll . forward fc . squeezeAll . snd . gruForward @BatchFirst dropoutOn gru . forward gruEmbed 
   
     
@@ -158,16 +157,15 @@ imdbModel tensor = sample (GRUWithEmbedSpec { gruSpec = GRUWithZerosInitSpec (GR
                                             }
                    ) 
 
-train :: _ => _ -> _ -> ListT m ((Tensor device 'Int64 '[batchSize, 256], Tensor device 'Float '[batchSize]), Int) -> _
+train :: _ => _ -> _ -> ListT m ((Tensor device 'Int64 '[batchSize, 128], Tensor device 'Int64 '[batchSize]), Int) -> _
 train model optim = P.foldM step begin done . enumerate 
   where step (model, optim) ((input, target), iter) = do
           let pred = sigmoid $ gruWithEmbedForward  model True input
-              loss =  binaryCrossEntropy @ReduceMean ones (pred) target 
-          let errorCount = toDType @'Float @'Int64  . sumAll . ne pred
+          let loss =  binaryCrossEntropy @ReduceMean ones pred (toDType @'Float @'Int64 target) 
+              errorCount = toDType @'Float @'Int64  . sumAll . ne (Torch.Typed.round pred)
           liftIO $ putStrLn $ "Loss: " <> show loss
           liftIO $ putStrLn $ "Error count: " <> show (errorCount target)
-          newParams <- liftIO $ runStep model optim loss 1e-2
-          pure newParams
+          liftIO $ runStep model optim loss 1e-3
         begin = pure (model, optim)
         done = pure 
           
