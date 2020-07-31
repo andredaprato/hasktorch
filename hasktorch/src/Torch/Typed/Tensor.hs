@@ -31,7 +31,7 @@ import           Data.Kind                      ( Constraint
                                                 )
 import           Data.Maybe
 import           Data.Proxy
-import           Data.Reflection
+-- import           Data.Reflection
 import           Foreign.ForeignPtr
 import           Foreign.Storable
 import           GHC.TypeLits
