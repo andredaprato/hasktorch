@@ -25,45 +25,35 @@ import           Data.Char (ord)
 import qualified Data.HashMap.Strict as H
 import qualified Data.Vector as V
 import           GHC.Generics (Generic)
-import           Pipes (MonadIO(liftIO))
-import           Pipes (cat, (>->), enumerate, yield, ListT(Select))
+import           Pipes
 import qualified Pipes.Prelude as P
 import qualified Pipes.Safe.Prelude as Safe
--- import qualified Pipes.Group as Pipes
+import qualified Pipes.Group as Group
 import qualified Pipes.Text as PT
 import qualified Pipes.Prelude.Text as PT
 import           Pipes.Safe (runSafeT)
 import           Lens.Family (view)
--- import           Torch
 import           System.Directory
 import           System.FilePath
 import           Control.Monad ((>=>))
 import           System.IO (IOMode(ReadMode))
-import Data.Text (Text(..))
+import           Data.Text (Text(..))
 import qualified Data.Text as Text
 
-import qualified Torch.Typed as Typed
-import           Torch.Typed
 import           Torch.Data.CsvDataset
 import           Torch.Data.StreamedPipeline
+import           Torch.Typed
 
-import           Data.Reflection
 import qualified Data.Set.Ordered as OSet
 import qualified GHC.Exts as Exts
 import           GHC.TypeLits
-import           GHC.TypeLits.Extra
-import           GHC.TypeNats
 
 import           Data.Maybe (fromMaybe, fromJust)
 import qualified Data.List as List
-import           Control.Monad.Trans.Control (control)
 import           Data.Foldable (toList)
 import           Model
-import qualified Lens.Family as Lens
-import qualified Pipes.Group as Group
-import qualified Debug.Trace as Debug
   
-data Glove = Glove { label :: Text
+data Glove = Glove { label :: Text.Text
                    , gloveEmbed :: [Float]
                    } deriving (Eq, Show, Generic)
 
@@ -114,36 +104,35 @@ main = runSafeT $ do
   (indexSet, embeds) <- relevantEmbeddings imdb gloveFile
   liftIO $ print $ OSet.size indexSet
 
-  init <- liftIO $ imdbModel @256 @1 @Unidirectional $ toTensoraa @'( CPU, 0) @VocabSize @EmbedDim $ embeds
-  let optim = mkAdam 0 0.9 0.999 (Typed.flattenParameters init)
+  init <- liftIO $ imdbModel @256 @1 @Unidirectional $ toTensorUnsafe @'( CPU, 0) @VocabSize @EmbedDim $ embeds
+  let optim = mkAdam 0 0.9 0.999 (flattenParameters init)
 
   (model, optim) <- runContT (dataPipeline @SeqLen @BatchSize indexSet imdb [Pos, Neg])
                     (train init optim)
   return ()
 
-toTensoraa :: forall device vocabSize embedDim .
-  ( Typed.All KnownNat '[vocabSize, embedDim]
-  , Typed.KnownDevice device
+toTensorUnsafe :: forall device vocabSize embedDim .
+  ( All KnownNat '[vocabSize, embedDim]
+  , KnownDevice device
   )
   => [[Float]]
-  -> Typed.Tensor device 'Float '[vocabSize, embedDim]
-toTensoraa stuff = fromJust $ Exts.fromList stuff -- bad
+  -> Tensor device 'Float '[vocabSize, embedDim]
+toTensorUnsafe stuff = fromJust $ Exts.fromList stuff -- bad
 
 padSequence :: forall (seqLen :: Nat) . (KnownNat seqLen) =>  [Text] -> [Text]
-padSequence tokens =  Prelude.take (Typed.natValI @seqLen) tokens <> (Prelude.take diffFrom $ repeat pad) 
-  where diffFrom = (Typed.natValI @seqLen) - Prelude.length tokens
+padSequence tokens =  Prelude.take (natValI @seqLen) tokens <> (Prelude.take diffFrom $ repeat pad) 
+  where diffFrom = (natValI @seqLen) - Prelude.length tokens
 
 imdbToIndices :: forall seqLen batchSize device m a .
-  (Functor m, Typed.KnownDevice device, KnownNat seqLen, KnownNat batchSize)
+  (Functor m, KnownDevice device, KnownNat seqLen, KnownNat batchSize)
   => OSet.OSet Text
-  -> Pipe [(([Text], Sentiment), a)] ((Typed.Tensor device 'Int64 '[batchSize, seqLen], Typed.Tensor device 'Int64 '[batchSize]), a) m ()
+  -> Pipe [(([Text], Sentiment), a)] ((Tensor device 'Int64 '[batchSize, seqLen], Tensor device 'Int64 '[batchSize]), a) m ()
 imdbToIndices oset =
   for Pipes.cat $ \x -> case f x of
                                     Nothing -> return ()
                                     Just y -> yield ( y, snd . head $  x)
     where f batch = do
-            pure $ Debug.traceShowId $ Prelude.length batch
-            labels <- (Exts.fromList $ (fromEnum . snd . fst) <$> batch) :: Maybe (Typed.Tensor '( 'CPU, 0) 'Int64 '[batchSize])
+            labels <- (Exts.fromList $ (fromEnum . snd . fst) <$> batch) :: Maybe (Tensor '( 'CPU, 0) 'Int64 '[batchSize])
             let indices = (fmap) (fmap (lookupIx oset) . fst . fst) $ batch
             ixTensor <- Exts.fromList indices
             pure (toDevice @device @('( 'CPU, 0)) ixTensor, toDevice @device @('( 'CPU, 0)) labels)
@@ -152,7 +141,7 @@ relevantEmbeddings imdb gloveFile = do
   (imdbVocab, embeds) <- concurrently (buildImdbVocab imdb) (runContT (makeListT' gloveFile [()]) getEmbeds)
   let relevantTokens = H.intersectionWith (,) imdbVocab embeds
   liftIO $ print $ H.size relevantTokens
-  --FIXME
+  --FIXME cleanup these constants
   pure $ takeNMostCommon 4998 100 relevantTokens
 
 -- | for preexisting datasets we could reexport a pipeline like this as well as the raw dataset
@@ -171,7 +160,7 @@ dataPipeline :: forall seqLen batchSize device r m f seed .  _ =>
   OSet.OSet Text -> Imdb -> f seed -> ContT r m (ListT m ((Tensor device 'Int64 '[batchSize, seqLen], Tensor device 'Int64 '[batchSize]), Int))
 dataPipeline indexSet imdb = tokenizerPipeline imdb >=> pmapChunk batches >=> pmap' 1 (imdbToIndices indexSet)
 
-  where batches = L.purely Group.folds (mapList pad) . Lens.view (Group.chunksOf $ natValI @batchSize) 
+  where batches = L.purely Group.folds (mapList pad) . view (Group.chunksOf $ natValI @batchSize) 
         pad = first . first $ padSequence @seqLen
 
 -- | Fold all values into a list
@@ -184,7 +173,6 @@ meaninglessTokens char = Prelude.any (== char)  [ '\"',  ')', '(', ',', '.']
 
 buildImdbVocab :: _ => Imdb -> m (H.HashMap Text Int)
 buildImdbVocab trainData = runContT (tokenizerPipeline trainData [Pos, Neg]) $ (P.fold step begin done . enumerate)
-
   where step h ((tokens, _), _) =  foldr (\token hAccum ->  H.insertWith (+) token 1 hAccum) h tokens
         begin = H.empty
         done = id

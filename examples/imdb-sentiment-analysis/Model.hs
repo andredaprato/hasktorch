@@ -19,8 +19,6 @@ import Torch.Typed
 import Torch.Typed.NN.Sparse
 
 import GHC.TypeLits
--- import GHC.TypeLits.Extra
--- import GHC.TypeLits (KnownNat, Nat)
 import GHC.Generics (Generic)
 import Torch.Typed.NN.Recurrent.Aux
 import qualified Pipes.Prelude as P
@@ -71,49 +69,6 @@ instance
   (GRUWithEmbed hiddenSize numLayers directionality  'ConstantInitialization numEmbeds embedSize dtype device) where
   sample GRUWithEmbedSpec{..} = GRUWithEmbed <$> sample gruSpec <*> sample embeddingSpec <*> sample fcSpec
 
--- instance HasForward (GRUWithEmbedSpec inputSize hiddenSize numLayers directionality numEmbeds embedSize dtype device)
---          (Tensor device 'Int64 shape) (Tensor device dtype shape') where
---   forward = embed gruEmbed 
--- gruWithEmbedForward :: forall inputSize
---                              hiddenSize
---                              numLayers
---                              directionality
---                              initialization
---                              numEmbeds
---                              embedSize
---                              dtype
---                              device
---                              batchSize
---                              shape
---                              shapeOrder
---                              seqLen
---                              hShape
---                              hcShape
---                              .
---                              ( hShape ~ (hiddenSize * NumberOfDirections directionality)
---                              , hcShape ~ '[(numLayers * NumberOfDirections directionality), batchSize, hiddenSize]
---                              ,  _)
---                     => (GRUWithEmbed
---                              inputSize
---                              hiddenSize
---                              numLayers
---                              directionality
---                              initialization
---                              numEmbeds
---                              embedSize
---                              dtype
---                              device)
---                     -> (Tensor device 'Int64 shape)
---                     -> ((Tensor device dtype
---                          (RNNShape
---                           shapeOrder
---                           seqLen
---                           batchSize
---                           -- (hiddenSize * NumberOfDirections directionality)),
---                           hShape),
---                           Tensor
---                           device dtype hcShape)
---                        )
 gruWithEmbedForward :: 
   (_) => GRUWithEmbed
        hiddenSize
@@ -136,6 +91,7 @@ gruWithEmbedForward GRUWithEmbed{..} dropoutOn =
   -- with dropout on final layer 
   -- we should be able to do this with Torch.Typed.Functional.chunk
    squeezeAll . forward fc . squeezeAll . snd . gruForward @BatchFirst dropoutOn gru . forward gruEmbed 
+  -- where  1
   
     
 imdbModel :: forall hiddenSize numLayers directionality numEmbeds embedSize dtype device .
