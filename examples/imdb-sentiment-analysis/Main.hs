@@ -74,6 +74,17 @@ instance FromRecord Glove where
     pure Glove { label = mLabel
                , gloveEmbed = mEmbed
                }
+getEmbeds :: forall device vocabSize embedDim m .
+  ( MonadIO m
+  ) =>
+  ListT m (V.Vector Glove, Int)
+  -> m _
+getEmbeds = P.fold step begin done .  enumerate 
+  where step h1 (inputs, iter) = do
+          V.foldl' (\ h Glove{..} -> H.insert label gloveEmbed h) h1 inputs 
+        begin = H.empty
+        done = id 
+
 pad = "[PAD]"
 unk = "[UNK]"
 
@@ -85,31 +96,7 @@ ixSetWithEmbed embedDim = (ixSet, Prelude.replicate 2 embed)
 lookupIx ::  OSet.OSet Text -> Text -> Int
 lookupIx set str = fromMaybe 1 (OSet.findIndex str set) 
   
-gloveToTensor :: V.Vector Glove -> V.Vector (Text, [Float])
-gloveToTensor gloves =  (\g -> (label g,  gloveEmbed g))  <$> gloves 
-
-pipeline glove = makeListT' glove >=> pmap 2 (first gloveToTensor)
  
-getEmbeds :: forall device vocabSize embedDim m .
-  ( MonadIO m
-  ) =>
-  ListT m ((V.Vector (Text, [Float])), Int)
-  -> m _
-getEmbeds inputs = P.foldM step begin done $  enumerate inputs 
-  where step h1 (inputs, iter) = do
-          pure $ V.foldl' (\ h (label, tensor) -> H.insert label tensor h) h1 inputs 
-        begin = pure H.empty
-        done = pure 
-
-catIfMember ::
-  Text ->
-  OSet.OSet Text ->
-  [Float] ->
-  [[Float]] ->
-  [[Float]]
-catIfMember label oset embed embeds = if label `OSet.member` oset
-                                      then embeds <> pure embed
-                                      else embeds
 
 type BatchSize = 128
 type SeqLen = 256
@@ -132,10 +119,6 @@ main = runSafeT $ do
                     (train init optim)
   return ()
 
-embedTensor embedding p = runEffect $ enumerate p >-> do
-  (this, label) <- await  
-  liftIO $ print $ Typed.embed embedding this
-  
 toTensoraa :: forall device vocabSize embedDim .
   ( Typed.All KnownNat '[vocabSize, embedDim]
   , Typed.KnownDevice device
@@ -155,7 +138,7 @@ imdbToIndices :: forall seqLen batchSize device m a .
 imdbToIndices oset =
   for Pipes.cat $ \x -> case f x of
                                     Nothing -> return ()
-                                    Just y -> yield (Debug.trace  "embedded" $ y, snd . head $  x)
+                                    Just y -> yield ( y, snd . head $  x)
     where f batch = do
             -- ugly because fromList doesn't support scalar tensors (yet?)
             pure $ Debug.traceShowId $ Prelude.length batch
@@ -165,7 +148,7 @@ imdbToIndices oset =
             pure (toDevice @device @('( 'CPU, 0)) ixTensor, toDType @'Float @'Int64 $ toDevice @device @('( 'CPU, 0)) labels)
 
 relevantEmbeddings imdb gloveFile = do
-  (imdbVocab, embeds) <- concurrently (buildImdbVocab imdb) (runContT (pipeline gloveFile [()]) getEmbeds)
+  (imdbVocab, embeds) <- concurrently (buildImdbVocab imdb) (runContT (makeListT' gloveFile [()]) getEmbeds)
   let relevantTokens = H.intersectionWith (,) imdbVocab embeds
   liftIO $ print $ H.size relevantTokens
   --FIXME
@@ -212,7 +195,7 @@ takeNMostCommon vocabSize embeddingDim = foldl accumIxSetAndEmbed (ixSetWithEmbe
   where mostCommon = List.take vocabSize . fmap (\(x, b) -> (x, snd b)) .  sortDesc . H.toList 
         sortDesc = List.sortBy (\a b -> compare (snd b) (snd a) )
   
-accumIxSetAndEmbed = \(os, embeds) (x, embed)  -> (x OSet.|< os, embeds <> pure embed)
+accumIxSetAndEmbed = \(os, embeds) (x, embed)  -> (os OSet.|> x, embeds <> pure embed)
   
 newtype Imdb = Imdb String
 
