@@ -102,6 +102,8 @@ type SeqLen = 128
 type VocabSize = 5000
 type EmbedDim = 100
 
+-- https://ai.stanford.edu/~amaas/data/sentiment/
+-- https://nlp.stanford.edu/projects/glove/
 main :: IO ()
 main = runSafeT $ do
   -- we should probably avoid using a csvDataset here and just define our own dataset 
