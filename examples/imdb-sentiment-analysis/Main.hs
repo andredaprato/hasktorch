@@ -103,7 +103,7 @@ main = runSafeT $ do
   (indexSet, embeds) <- relevantEmbeddings imdb gloveFile
   liftIO $ print $ OSet.size indexSet
 
-  init <- liftIO $ imdbModel @128 @1 @Unidirectional $ toTensorUnsafe @'( CUDA, 0) @VocabSize @EmbedDim $ embeds
+  init <- liftIO $ imdbModel @128 @4 @Unidirectional $ toTensorUnsafe @'( CUDA, 0) @VocabSize @EmbedDim $ embeds
   let optim    = mkAdam 0 0.9 0.999 (flattenParameters init)
       trainer  = initTrainer init optim
 

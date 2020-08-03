@@ -48,10 +48,8 @@ data GRUWithEmbedSpec
                      } deriving Generic
 
 data GRUWithEmbed
-  -- inputSize hiddenSize numLayers directionality initialization numEmbeds embedSize dtype device
    hiddenSize numLayers directionality initialization numEmbeds embedSize dtype device
   = GRUWithEmbed { gru :: GRUWithInit embedSize hiddenSize numLayers directionality initialization dtype device
-                 -- , embed :: Embedding paddingIdx numEmbeds embedSize 'Learned dtype device
                  , gruEmbed :: Embedding 'Nothing numEmbeds embedSize 'Learned dtype device
                  , fc :: Linear (hiddenSize * NumberOfDirections directionality) 1 dtype device
                  } deriving Generic
@@ -74,11 +72,11 @@ instance
   sample GRUWithEmbedSpec{..} = GRUWithEmbed <$> sample gruSpec <*> sample embeddingSpec <*> sample fcSpec
 
 gruWithEmbedForward :: 
-  (_) =>
+  _ =>
      Bool
   -> GRUWithEmbed
        hiddenSize
-       1 -- num Layers
+       4 -- num Layers
        Unidirectional
        initialization
        numEmbeds
@@ -89,10 +87,10 @@ gruWithEmbedForward ::
      -> Tensor device 'Float '[batchSize]
 gruWithEmbedForward dropoutOn GRUWithEmbed{..} =
    -- squeezeAll . forward fc . squeezeAll . snd . gruForward @BatchFirst dropoutOn gru . forward gruEmbed 
-   -- squeezeAll . forward fc . f . chunk @5 @0 .  snd . gruForward @BatchFirst dropoutOn gru . forward gruEmbed 
-   squeezeAll . forward fc . f . chunk @2 @0 .  snd . gruForward @BatchFirst dropoutOn gru . forward gruEmbed 
-  -- where f g@(_ :. _ :. lastLayers) = Debug.trace (show g) $ cat @2 lastLayers
-  where f l = cat @2 l
+   squeezeAll . forward fc . f . chunk @5 @0 .  snd . gruForward @BatchFirst dropoutOn gru . forward gruEmbed 
+   -- squeezeAll . forward fc . f . chunk @2 @0 .  snd . gruForward @BatchFirst dropoutOn gru . forward gruEmbed 
+  where f g@(_ :. _ :. _ :. lastLayer) = cat @2 lastLayer
+  -- where f l = cat @2 l
   
 imdbModel :: forall hiddenSize numLayers directionality numEmbeds embedSize dtype device .
   _ =>
