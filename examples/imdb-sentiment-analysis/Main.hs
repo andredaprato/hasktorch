@@ -84,13 +84,12 @@ ixSetWithEmbed embedDim = (ixSet, Prelude.replicate 2 embed)
 
 lookupIx ::  OSet.OSet Text -> Text -> Int
 lookupIx set str = fromMaybe 1 (OSet.findIndex str set) 
-  
- 
 
-type BatchSize = 16
+type BatchSize = 64
 type SeqLen = 128
-type VocabSize = 5000
+type VocabSize = 10000
 type EmbedDim = 100
+-- type Directionality 
 
 -- https://ai.stanford.edu/~amaas/data/sentiment/
 -- https://nlp.stanford.edu/projects/glove/
@@ -99,16 +98,19 @@ main = runSafeT $ do
   -- we should probably avoid using a csvDataset here and just define our own dataset 
   -- since glove files aren't really valid csv (and this causes some issues)
   let (gloveFile :: CsvDataset Glove) = (csvDataset "glove.6B.100d.txt") { batchSize = 50, delimiter = fromIntegral (ord ' ') }
-  let imdb = Imdb "../aclImdb/train"
+  let imdb = Imdb "aclImdb/train"
 
   (indexSet, embeds) <- relevantEmbeddings imdb gloveFile
   liftIO $ print $ OSet.size indexSet
 
-  init <- liftIO $ imdbModel @256 @1 @Unidirectional $ toTensorUnsafe @'( CPU, 0) @VocabSize @EmbedDim $ embeds
-  let optim = mkAdam 0 0.9 0.999 (flattenParameters init)
+  init <- liftIO $ imdbModel @128 @1 @Unidirectional $ toTensorUnsafe @'( CUDA, 0) @VocabSize @EmbedDim $ embeds
+  let optim    = mkAdam 0 0.9 0.999 (flattenParameters init)
+      trainer  = initTrainer init optim
 
-  (model, optim) <- runContT (dataPipeline @SeqLen @BatchSize indexSet imdb [Pos, Neg])
-                    (train init optim)
+  _ <- V.foldM (\trainer' epoch  -> runContT (dataPipeline @SeqLen @BatchSize indexSet imdb [Pos, Neg])
+                                                        --  $ train model optim' (gruWithEmbedForward True)
+                                                        $ train trainer' (gruWithEmbedForward True)
+                            ) trainer (V.fromList [1..10])
   return ()
 
 toTensorUnsafe :: forall device vocabSize embedDim .
@@ -123,14 +125,14 @@ padSequence :: forall (seqLen :: Nat) . (KnownNat seqLen) =>  [Text] -> [Text]
 padSequence tokens =  Prelude.take (natValI @seqLen) tokens <> (Prelude.take diffFrom $ repeat pad) 
   where diffFrom = (natValI @seqLen) - Prelude.length tokens
 
-imdbToIndices :: forall seqLen batchSize device m a .
+imdbToIndices :: forall seqLen batchSize device m .
   (Functor m, KnownDevice device, KnownNat seqLen, KnownNat batchSize)
   => OSet.OSet Text
-  -> Pipe [(([Text], Sentiment), a)] ((Tensor device 'Int64 '[batchSize, seqLen], Tensor device 'Int64 '[batchSize]), a) m ()
+  -> Pipe [(([Text], Sentiment), Int)] ((Tensor device 'Int64 '[batchSize, seqLen], Tensor device 'Int64 '[batchSize]), Int) m ()
 imdbToIndices oset =
   for Pipes.cat $ \x -> case f x of
                                     Nothing -> return ()
-                                    Just y -> yield ( y, snd . head $  x)
+                                    Just y -> yield ( y, (snd . head $  x) `mod` natValI @batchSize)
     where f batch = do
             labels <- (Exts.fromList $ (fromEnum . snd . fst) <$> batch) :: Maybe (Tensor '( 'CPU, 0) 'Int64 '[batchSize])
             let indices = (fmap) (fmap (lookupIx oset) . fst . fst) $ batch
@@ -142,7 +144,7 @@ relevantEmbeddings imdb gloveFile = do
   let relevantTokens = H.intersectionWith (,) imdbVocab embeds
   liftIO $ print $ H.size relevantTokens
   --FIXME cleanup these constants
-  pure $ takeNMostCommon 4998 100 relevantTokens
+  pure $ takeNMostCommon 9998 100 relevantTokens
 
 -- | for preexisting datasets we could reexport a pipeline like this as well as the raw dataset
 tokenizerPipeline dataset = makeListT' dataset

@@ -495,7 +495,8 @@ gruForward dropoutOn (GRUWithConstInit gruModel@(GRU _ (Dropout dropoutProb)) hc
  where
   hc' =
     reshape @hcShape
-      . expand
+  -- can't use expand only because it doesn't copy memory!
+      . unsafePerformIO . clone . expand
           @'[batchSize, numLayers * NumberOfDirections directionality, hiddenSize]
           False -- TODO: What does the bool do?
       $ hc
@@ -523,7 +524,8 @@ gruForward dropoutOn (GRUWithLearnedInit gruModel@(GRU _ (Dropout dropoutProb)) 
  where
   hc' =
     reshape @hcShape
-      . expand
+  -- can't use expand only because it doesn't copy memory!
+      . unsafePerformIO . clone . expand
           @'[batchSize, numLayers * NumberOfDirections directionality, hiddenSize]
           False -- TODO: What does the bool do?
       . toDependent
