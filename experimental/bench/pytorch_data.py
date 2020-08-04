@@ -4,6 +4,7 @@ import time
 import timeit
 from torch.utils.data import Dataset, DataLoader, IterableDataset
 
+DATASET_SIZE= 100000
 
 class SyntheticDataset(IterableDataset):
 
@@ -18,26 +19,30 @@ class SyntheticDataset(IterableDataset):
                 sample = self.transform(sample)
             yield sample
 
+
 def make_data(batch_size, num_workers):
-    return DataLoader(SyntheticDataset(100000), batch_size=batch_size, num_workers=num_workers)
+    return DataLoader(SyntheticDataset(DATASET_SIZE),
+                      batch_size=batch_size,
+                      num_workers=num_workers)
+
 
 def read_data(dataloader):
     for i, batch in enumerate(dataloader):
         # do _something_
         inter = batch + 1
+    return inter
 
 
 def bench_python(f_2, data,  loops=None):
     def f():
         return f_2(data)
-    
     if loops is None:
         f()
         s = time.perf_counter()
         f()
         e = time.perf_counter()
         duration = e - s
-        loops = max(4, int(2 / duration)) # aim for 2s
+        loops = max(4, int(2 / duration))  # aim for 2s
     return (timeit.timeit(f, number=loops, globals=globals()) / loops, loops)
 
 
@@ -56,8 +61,12 @@ def print_result(bench_name, py_time, loops):
 if __name__ == "__main__":
     no_workers = make_data(batch_size=None, num_workers=0)
     no_workers_batched = make_data(batch_size=64, num_workers=0)
-    four_workers = make_data(batch_size=None, num_workers=4)
+    # four_workers = make_data(batch_size=None, num_workers=4)
     four_workers_batched = make_data(batch_size=64, num_workers=4)
-    for i, data in enumerate([no_workers, no_workers_batched, four_workers, four_workers_batched]):
-        (runtime, loops_1) = bench_python(read_data, data)
-        print_result("No workers", runtime, 2)
+
+    dataloaders = [no_workers, no_workers_batched, four_workers_batched]
+    bench_labels = ["No workers (unbatched)", "No workers (batch size 64)", "4 workers (batch size 64)"]
+    for (data, label) in zip(dataloaders, bench_labels):
+        (runtime, _) = bench_python(read_data, data)
+        print_result(label, runtime, 2)
+

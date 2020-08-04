@@ -31,7 +31,6 @@ readEpoch dataset seeds = do
   val <- runContT (makeListT' dataset seeds) $ (runEffect . consume)
   pure ()
 
-
 consume x = enumerate x >-> (for Pipes.cat $  (\x -> do void . pure . (+ 1) . fst $ x))
   
 batch :: Pipe [Tensor] Tensor IO ()
