@@ -26,6 +26,17 @@ executable untyped-nlp
   hs-source-dirs:      untyped-nlp
   main-is:             Main.hs
 
+executable bench
+  import:              config
+  ghc-options:         -fno-warn-partial-type-signatures -threaded -rtsopts "-with-rtsopts= -N"
+  hs-source-dirs:      bench
+  main-is:             Main.hs
+  build-depends:       pipes,
+                       clock,
+                       formatting,
+                       criterion
+
+
 executable dataloader-cifar10
   import:              config
   hs-source-dirs:      dataloader-cifar10
