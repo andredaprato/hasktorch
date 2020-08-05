@@ -37,7 +37,6 @@ def bench_python(f_2, data,  loops=None):
     def f():
         return f_2(data)
     if loops is None:
-        f()
         s = time.perf_counter()
         f()
         e = time.perf_counter()
@@ -68,6 +67,6 @@ if __name__ == "__main__":
     dataloaders = [no_workers_batched, one_workers_batched, two_workers_batched]
     bench_labels = ["No workers (batch size 64)", "1 workers (batch size 64)", "2 workers (batch size 64)"]
     for (data, label) in zip(dataloaders, bench_labels):
-        (runtime, _) = bench_python(read_data, data)
-        print_result(label, runtime, 2)
+        (runtime, loops) = bench_python(read_data, data)
+        print_result(label, runtime, loops)
 
