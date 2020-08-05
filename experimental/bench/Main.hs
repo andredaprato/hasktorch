@@ -47,12 +47,8 @@ main = do
             let syntheticDataset = SyntheticDataset 500_000_0
                 batchedDataset = CollatedDataset { set = syntheticDataset, chunkSize = 64, collateFn = batch}
             in bgroup
-              "dataloader with threads/1000000"
+              "dataloader with threads/5000000"
               [
-                -- bench "read tensors with 1 seed(s)"  $ nfIO
-                -- $ readEpoch syntheticDataset (seeds 1)
-              -- , bench "read tensors with 4 seed(s)"
-              --   $ nfIO $ readEpoch syntheticDataset (seeds 2)
                 bench "read batch size (64) tensors with 1 seed(s)"
                 $ nfIO $ readEpoch batchedDataset (seeds 1)
               , bench "read batch size (64) tensors with 2 seed(s)"

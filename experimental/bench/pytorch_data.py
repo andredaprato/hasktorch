@@ -12,12 +12,6 @@ class SyntheticDataset(Dataset):
         self.transform = transform
         self.iters = iters
 
-    # def __iter__(self):
-    #     for i in range(self.iters):
-    #         sample = torch.ones(1)
-    #         if self.transform:
-    #             sample = self.transform(sample)
-    #         yield sample
     def __len__(self):
         return self.iters
     def __getitem__(self, ix):
@@ -25,7 +19,6 @@ class SyntheticDataset(Dataset):
         if self.transform:
             sample = self.transform(sample)
         return sample
-
 
 def make_data(batch_size, num_workers):
     return DataLoader(SyntheticDataset(DATASET_SIZE),
