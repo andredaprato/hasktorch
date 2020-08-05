@@ -20,13 +20,15 @@ import Criterion.Types (Config(reportFile))
 
 newtype SyntheticDataset = SyntheticDataset { iters :: Int } 
 
-instance Datastream IO Int SyntheticDataset Tensor where
-  streamBatch s _  = Select $ for (each [1 .. iters s ]) $ \_ -> do yield $ ones' [ 1000 ]
+instance Datastream IO (Int, Int) SyntheticDataset Tensor where
+  streamBatch s (id, numSeeds)  = Select $ for (each [start .. end]) $ \_ -> do yield $ ones' [ 10 ]
+    where start = id * (iters s `Prelude.div` numSeeds)
+          end = (id + 1) * (iters s `Prelude.div` numSeeds)
 
-seeds :: Int -> [Int]
-seeds n = replicate n 1 
+seeds :: Int -> [(Int, Int)]
+seeds n = zip (take n [0..]) (repeat n)
 
-readEpoch :: ((Datastream IO Int dataset a, Num a)) => dataset -> [Int] ->  IO () 
+readEpoch :: ((Datastream IO (Int, Int) dataset Tensor)) => dataset -> [(Int, Int)] ->  IO () 
 readEpoch dataset seeds = do
   val <- runContT (makeListT' dataset seeds) $ (runEffect . consume)
   pure ()
@@ -42,18 +44,19 @@ main = do
     (defaultConfig { reportFile = Just "dataloader.html"})
     [env (pure ())
          (\ ~_ ->
-            let syntheticDataset = SyntheticDataset 100_000
+            let syntheticDataset = SyntheticDataset 500_000_0
                 batchedDataset = CollatedDataset { set = syntheticDataset, chunkSize = 64, collateFn = batch}
             in bgroup
-              "dataloader with threads/100000"
-              [ bench "read tensors with 1 seed(s)"  $ nfIO
-                $ readEpoch syntheticDataset (seeds 1)
-              , bench "read tensors with 4 seed(s)"
-                $ nfIO $ readEpoch syntheticDataset (seeds 4)
-              , bench "read batch size (64) tensors with 1 seed(s)"
+              "dataloader with threads/1000000"
+              [
+                -- bench "read tensors with 1 seed(s)"  $ nfIO
+                -- $ readEpoch syntheticDataset (seeds 1)
+              -- , bench "read tensors with 4 seed(s)"
+              --   $ nfIO $ readEpoch syntheticDataset (seeds 2)
+                bench "read batch size (64) tensors with 1 seed(s)"
                 $ nfIO $ readEpoch batchedDataset (seeds 1)
-              , bench "read batch size (64) tensors with 4 seed(s)"
-                $ nfIO $ readEpoch batchedDataset (seeds 4)
+              , bench "read batch size (64) tensors with 2 seed(s)"
+                $ nfIO $ readEpoch batchedDataset (seeds 2)
               ])
     ]
 
