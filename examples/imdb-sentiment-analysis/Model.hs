@@ -107,6 +107,7 @@ imdbModel :: forall hiddenSize numLayers directionality numEmbeds embedSize dtyp
         )
 imdbModel tensor = sample (GRUWithEmbedSpec { gruSpec = GRUWithZerosInitSpec (GRUSpec (DropoutSpec 0.5))
                                             , embeddingSpec = LearnedEmbeddingWithCustomInitSpec tensor
+                                            -- , embeddingSpec = ConstEmbeddingSpec tensor
                                             , fcSpec = LinearSpec
                                             }
                    ) 
@@ -118,13 +119,15 @@ train trainer forward  = P.foldM step begin done . enumerate
           let pred = sigmoid $ forward model input
           let loss = binaryCrossEntropy @ReduceMean ones pred (toDType @'Float @'Int64 target) 
               errorCount =  sumAll . ne (Torch.Typed.round pred) $ target
+          -- liftIO $ print pred
+          liftIO $ print target 
           newParams <- liftIO $ runStep model optim loss 1e-3
-          pure $ updateTrainer newParams loss (errorCount ) $ t
+          pure $ updateTrainer newParams loss (toInt $ errorCount) $ t
         begin = pure trainer
         done t@Trainer{..} = do  
             liftIO $ print iter 
             liftIO $ putStrLn $ "Loss: " <> show netLoss  
-            liftIO $ putStrLn $ "Accuracy: " <> show (toDType @'Float @'Int64 errorCount / (fromIntegral $ natValI @batchSize))
+            liftIO $ putStrLn $ "Accuracy: " <> show (1 - fromIntegral errorCount / (fromIntegral $ natValI @batchSize))
             pure $ t { Model.iter = 0}
           
 -- An extensible record for this sort of datatype would be really nice
@@ -133,9 +136,9 @@ data Trainer model optim device = Trainer { model :: model
                                           -- right now we get a gpu memory leak if we accumulate these metrics
                                           -- which is strange since static-mnist accumulates metrics using toFloat. 
                                           -- , netLoss :: Float
-                                          -- , errorCount  :: Int
+                                          , errorCount  :: Int
                                           , netLoss :: Tensor device 'Float '[]
-                                          , errorCount  :: Tensor device  'Int64 '[]
+                                          -- , errorCount  :: Tensor device  'Int64 '[]
                                           , iter :: Int
                                    }
 updateTrainer (model', optim') loss' errorCount' Trainer{..} =  Trainer { model = model'

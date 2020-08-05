@@ -52,7 +52,8 @@ import           Data.Maybe (fromMaybe, fromJust)
 import qualified Data.List as List
 import           Data.Foldable (toList)
 import           Model
-  
+import     CNN
+
 data Glove = Glove { label :: Text.Text
                    , gloveEmbed :: [Float]
                    } deriving (Eq, Show, Generic)
@@ -103,14 +104,22 @@ main = runSafeT $ do
   (indexSet, embeds) <- relevantEmbeddings imdb gloveFile
   liftIO $ print $ OSet.size indexSet
 
-  init <- liftIO $ imdbModel @128 @4 @Unidirectional $ toTensorUnsafe @'( CUDA, 0) @VocabSize @EmbedDim $ embeds
+  -- init <- liftIO $ imdbModel @128 @4 @Unidirectional $ toTensorUnsafe @'( CUDA, 0) @VocabSize @EmbedDim $ embeds
+  init <- liftIO $ sample $ CNNSpec { embeddingSpec = ConstEmbeddingSpec $ toTensorUnsafe @'( CUDA, 0) @VocabSize @EmbedDim embeds
+                                    , cnnSpec1 = Conv2dSpec @_ @100 @_ @EmbedDim
+                                    , cnnSpec2 = Conv2dSpec @_ @100 @_ @EmbedDim
+                                    , cnnSpec3 = Conv2dSpec @_ @100 @_ @EmbedDim 
+                                    , fcSpec = LinearSpec
+                                    , dropoutSpec = DropoutSpec 0.5
+                                    }
   let optim    = mkAdam 0 0.9 0.999 (flattenParameters init)
       trainer  = initTrainer init optim
 
   _ <- V.foldM (\trainer' epoch  -> runContT (dataPipeline @SeqLen @BatchSize indexSet imdb [Pos, Neg])
                                                         --  $ train model optim' (gruWithEmbedForward True)
-                                                        $ train trainer' (gruWithEmbedForward True)
-                            ) trainer (V.fromList [1..10])
+                                                        --  $ train trainer' (gruWithEmbedForward True)
+                                                        $ train trainer' cnnForward
+                            ) trainer (V.fromList [1..5])
   return ()
 
 toTensorUnsafe :: forall device vocabSize embedDim .
