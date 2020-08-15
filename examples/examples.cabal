@@ -288,7 +288,7 @@ executable imdb-sentiment-analysis
   hs-source-dirs:      imdb-sentiment-analysis
   main-is:             Main.hs
   other-modules:       Model
-  ghc-options:         -fno-warn-partial-type-signatures -threaded
+  ghc-options:         -fno-warn-partial-type-signatures -threaded 
   build-depends:       libtorch-ffi
                      , bytestring >= 0.10.8
                      , mtl
@@ -297,7 +297,9 @@ executable imdb-sentiment-analysis
                      , cassava
                      , pipes
                      , pipes-safe
+                     , pipes-group
                      , pipes-text
+                     , foldl
                      , vector
                      , unordered-containers >= 0.2
                      , reflection
@@ -308,3 +310,4 @@ executable imdb-sentiment-analysis
                      , monad-control >= 1.0
                      , lifted-async
                      , lens-family-core
+                     , filepath

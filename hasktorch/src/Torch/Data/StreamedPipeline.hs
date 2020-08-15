@@ -20,7 +20,11 @@ module Torch.Data.StreamedPipeline
     makeListT',
     pmap,
     pmap',
+<<<<<<< HEAD
     dataloaderOpts,
+=======
+    pmapChunk,
+>>>>>>> 6df369bc... batch tensors
     Datastream (..),
     MonadBase (..),
     MonadBaseControl (..),
@@ -75,6 +79,15 @@ pmap' n f  prod = ContT $ \cont ->
       (\output -> runEffect $ enumerate prod >-> f >-> toOutput output)
       (\input -> cont . Select $ fromInput input)
 
+-- | Run a parallel producer  over the given ListT. This is useful for grouping producers
+-- | (see the pipes-group package). (TODO: with the given number of workers)
+pmapChunk :: (MonadIO m, MonadBaseControl IO m) => (Producer a m () -> Producer b m ()) ->  ListT m a -> ContT r m (ListT m b)
+pmapChunk f  prod = ContT $ \cont ->
+  snd
+    <$> withBufferLifted
+      (bounded 10)
+      (\output -> runEffect $ (f $ enumerate prod) >-> toOutput output )
+      (\input -> cont . Select $ fromInput input)
 
 makeListT ::
   forall sample m dataset seed b r.
