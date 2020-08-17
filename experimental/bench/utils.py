@@ -1,7 +1,13 @@
 import time
 import timeit
 
-DATASET_SIZE= 5000000
+DATASET_SIZE= 50
+
+def read_data(dataloader):
+    for i, batch in enumerate(dataloader):
+        # do _something_
+        inter = batch + 1
+    return inter
 
 def bench_python(f_2, data,  loops=None):
     def f():
